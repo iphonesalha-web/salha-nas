@@ -202,8 +202,8 @@ final class BackupEngine: ObservableObject {
         if todo.isEmpty { result.message = "لا توجد صور جديدة ✓"; return finish(result) }
 
         status = "جاري الاتصال بالـ NAS…"
-        let smb: SMB2Manager
-        do { smb = try await Self.connect(cfg) }
+        let store: RemoteStore
+        do { store = try await Remote.open(cfg) }
         catch { result.message = "تعذّر الاتصال: " + NASError.describe(error); return finish(result) }
 
         var madeDirs: Set<String> = []
@@ -213,7 +213,7 @@ final class BackupEngine: ObservableObject {
             for part in path.split(separator: "/") {
                 cur = cur.isEmpty ? String(part) : cur + "/" + part
                 if madeDirs.contains(cur) { continue }
-                try? await smb.createDirectory(atPath: cur)
+                await store.makeDir(cur)
                 madeDirs.insert(cur)
             }
         }
@@ -242,15 +242,14 @@ final class BackupEngine: ObservableObject {
                     let size = ((try? fm.attributesOfItem(atPath: local.path)[.size]) as? NSNumber)?.int64Value ?? -1
 
                     // موجود مسبقاً بنفس الحجم؟ لا داعي لرفعه مرة ثانية
-                    if let attrs = try? await smb.attributesOfItem(atPath: remote),
-                       let remoteSize = (attrs[.fileSizeKey] as? NSNumber)?.int64Value, remoteSize == size {
+                    if let remoteSize = await store.size(remote), remoteSize == size {
                         result.skipped += 1
                     } else {
                         let part = remote + ".part"
-                        try? await smb.removeItem(atPath: part)
-                        try await smb.uploadItem(at: local, toPath: part, progress: { _ in true })
-                        try? await smb.removeItem(atPath: remote)
-                        try await smb.moveItem(atPath: part, toPath: remote)
+                        await store.remove(part)
+                        try await store.upload(local, to: part)
+                        await store.remove(remote)
+                        try await store.move(part, to: remote)
                         result.uploaded += 1
                     }
                     consecutiveErrors = 0
@@ -271,7 +270,7 @@ final class BackupEngine: ObservableObject {
             if consecutiveErrors >= 3 { break }
         }
 
-        try? await smb.disconnectShare(gracefully: true)
+        await store.close()
         try? fm.removeItem(at: tmp)
 
         if consecutiveErrors >= 3 {

@@ -8,10 +8,13 @@ struct NASConfig: Codable, Equatable {
     var folder = "iPhone"
     var includeVideos = true
     var wifiOnly = true
+    var transport: String?   // "smb" أو "ftp"
+
+    var useFTP: Bool { transport == "ftp" }
 
     var isComplete: Bool {
         !host.trimmingCharacters(in: .whitespaces).isEmpty &&
-        !share.trimmingCharacters(in: .whitespaces).isEmpty &&
+        (useFTP || !share.trimmingCharacters(in: .whitespaces).isEmpty) &&
         !username.trimmingCharacters(in: .whitespaces).isEmpty &&
         !Keychain.get("nas-password").isEmpty
     }

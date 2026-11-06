@@ -100,7 +100,7 @@ struct ContentView: View {
 
                 Section(header: Text("الوجهة")) {
                     row("السيرفر", config.host)
-                    row("المجلد المشترك", config.share.isEmpty ? "—" : config.share)
+                    row("الاتصال", config.useFTP ? "FTP" : (config.share.isEmpty ? "SMB" : "SMB · " + config.share))
                     row("المجلد", "/" + (config.cleanFolder.isEmpty ? "" : config.cleanFolder + "/") + "السنة/الشهر")
                 }
             }
@@ -171,7 +171,21 @@ struct SettingsView: View {
                         .environment(\.layoutDirection, .leftToRight)
                 }
 
-                Section(header: Text("المجلد المشترك")) {
+                Section(header: Text("طريقة الاتصال"),
+                        footer: Text(cfg.useFTP
+                            ? "FTP: فعّل «Zugriff über FTP» في الـ FRITZ!Box. يظهر كل قرص كمجلد."
+                            : "إذا لم يعمل SMB جرّب FTP.")) {
+                    Picker("طريقة الاتصال", selection: Binding(
+                        get: { cfg.useFTP ? "ftp" : "smb" },
+                        set: { cfg.transport = $0; cfg.folder = "" })) {
+                        Text("SMB").tag("smb")
+                        Text("FTP").tag("ftp")
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                Section(header: Text("المكان على الـ NAS")) {
+                    if !cfg.useFTP {
                     if shares.isEmpty {
                         field("مثال: FRITZ.NAS", $cfg.share)
                     } else {
@@ -185,6 +199,7 @@ struct SettingsView: View {
                         Label("عرض المجلدات الموجودة", systemImage: "folder.badge.questionmark")
                     }
                     .disabled(busy)
+                    }
                     Button {
                         save()
                         showFolders = true
@@ -199,7 +214,7 @@ struct SettingsView: View {
                                 .environment(\.layoutDirection, .leftToRight)
                         }
                     }
-                    .disabled(busy || cfg.share.isEmpty || password.isEmpty)
+                    .disabled(busy || (!cfg.useFTP && cfg.share.isEmpty) || password.isEmpty)
                 }
 
                 Section(header: Text("الخيارات")) {
@@ -274,7 +289,7 @@ struct SettingsView: View {
     private func test() async {
         save()
         if password.isEmpty { testResult = "اكتب كلمة المرور أولاً."; return }
-        if cfg.share.trimmingCharacters(in: .whitespaces).isEmpty {
+        if !cfg.useFTP && cfg.share.trimmingCharacters(in: .whitespaces).isEmpty {
             await loadShares()
             if cfg.share.isEmpty { return }
             save()
@@ -282,9 +297,12 @@ struct SettingsView: View {
         busy = true
         defer { busy = false }
         do {
-            let smb = try await BackupEngine.connect(cfg)
-            try? await smb.disconnectShare(gracefully: true)
-            testResult = "✓ الاتصال ناجح بالمجلد «\(cfg.share)»"
+            let store = try await Remote.open(cfg)
+            let dirs = (try? await store.listDirs(cfg.cleanFolder)) ?? []
+            await store.close()
+            testResult = cfg.useFTP
+                ? "✓ الاتصال ناجح عبر FTP (\(dirs.count) مجلد)"
+                : "✓ الاتصال ناجح بالمجلد «\(cfg.share)»"
         } catch {
             testResult = "✗ " + NASError.describe(error)
         }
@@ -299,7 +317,7 @@ struct FolderPicker: View {
     @Binding var selection: String
     @Environment(\.dismiss) private var dismiss
 
-    @State private var smb: SMB2Manager?
+    @State private var store: RemoteStore?
     @State private var path: [String] = []
     @State private var folders: [String] = []
     @State private var loading = false
@@ -315,7 +333,7 @@ struct FolderPicker: View {
                 Section {
                     HStack {
                         Image(systemName: "externaldrive")
-                        Text(cfg.share + (current.isEmpty ? "" : "/" + current))
+                        Text((cfg.useFTP ? "FTP:/" : cfg.share + "/") + current)
                             .lineLimit(2)
                             .environment(\.layoutDirection, .leftToRight)
                     }
@@ -361,7 +379,7 @@ struct FolderPicker: View {
                     } label: {
                         Label("مجلد جديد هنا", systemImage: "folder.badge.plus")
                     }
-                    .disabled(loading || smb == nil)
+                    .disabled(loading || store == nil)
                 }
 
                 if !error.isEmpty {
@@ -376,7 +394,7 @@ struct FolderPicker: View {
                         Label("اختيار هذا المجلد", systemImage: "checkmark.circle.fill")
                             .font(.headline)
                     }
-                    .disabled(loading || smb == nil)
+                    .disabled(loading || store == nil)
                 }
             }
             .listStyle(.insetGrouped)
@@ -400,8 +418,8 @@ struct FolderPicker: View {
                 }
             }
             .onDisappear {
-                let s = smb
-                Task { try? await s?.disconnectShare(gracefully: true) }
+                let s = store
+                Task { await s?.close() }
             }
         }
         .navigationViewStyle(.stack)
@@ -412,15 +430,11 @@ struct FolderPicker: View {
         error = ""
         defer { loading = false }
         do {
-            if smb == nil { smb = try await BackupEngine.connect(cfg) }
-            guard let smb = smb else { return }
-            let items = try await smb.contentsOfDirectory(atPath: current.isEmpty ? "/" : current)
-            folders = items.compactMap { e -> String? in
-                guard (e[.isDirectoryKey] as? Bool) == true, let n = e[.nameKey] as? String,
-                      !n.hasPrefix("."), !n.hasPrefix("$") else { return nil }
-                return n
-            }
-            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            if store == nil { store = try await Remote.open(cfg) }
+            guard let store = store else { return }
+            folders = try await store.listDirs(current)
+                .filter { !$0.hasPrefix(".") && !$0.hasPrefix("$") }
+                .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
         } catch {
             folders = []
             self.error = NASError.describe(error)
@@ -429,10 +443,10 @@ struct FolderPicker: View {
 
     private func create() async {
         let name = newName.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
-        guard !name.isEmpty, let smb = smb else { return }
+        guard !name.isEmpty, let store = store else { return }
         let target = current.isEmpty ? name : current + "/" + name
         do {
-            try await smb.createDirectory(atPath: target)
+            await store.makeDir(target)
             path.append(name)
             await load()
         } catch {
