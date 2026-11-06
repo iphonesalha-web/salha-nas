@@ -207,7 +207,18 @@ struct SettingsView: View {
                     Toggle("على الواي فاي فقط", isOn: $cfg.wifiOnly)
                 }
 
-                Section(footer: Text(testResult)) {
+                Section(footer: Text(testResult).environment(\.layoutDirection, .rightToLeft)) {
+                    Button {
+                        Task {
+                            busy = true
+                            testResult = "جاري الفحص…"
+                            testResult = await NetworkCheck.run(host: cfg.host)
+                            busy = false
+                        }
+                    } label: {
+                        Label("فحص الشبكة", systemImage: "stethoscope")
+                    }
+                    .disabled(busy)
                     Button {
                         Task { await test() }
                     } label: {

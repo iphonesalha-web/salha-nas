@@ -110,3 +110,55 @@ final class LocalNetworkPrompt {
         }
     }
 }
+
+/// يفحص هل يمكن الوصول إلى منافذ الـ FRITZ!Box: الويب (80) و SMB (445 / 139)
+enum NetworkCheck {
+    static func probe(host: String, port: UInt16, timeout: Double = 5) async -> String {
+        await withCheckedContinuation { (cont: CheckedContinuation<String, Never>) in
+            let conn = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+            var finished = false
+            let q = DispatchQueue(label: "probe\(port)")
+            func done(_ r: String) {
+                guard !finished else { return }
+                finished = true
+                conn.cancel()
+                cont.resume(returning: r)
+            }
+            conn.stateUpdateHandler = { st in
+                switch st {
+                case .ready: done("ok")
+                case .failed(let e): done("فشل: \(e.localizedDescription)")
+                case .waiting(let e):
+                    if case .posix(let code) = e, code == .EPERM || code == .EACCES {
+                        done("ممنوع (إذن الشبكة المحلية)")
+                    }
+                default: break
+                }
+            }
+            conn.start(queue: q)
+            q.asyncAfter(deadline: .now() + timeout) { done("لا رد") }
+        }
+    }
+
+    static func run(host: String) async -> String {
+        let h = host.trimmingCharacters(in: .whitespaces)
+        let web = await probe(host: h, port: 80)
+        let smb = await probe(host: h, port: 445)
+        let nb = await probe(host: h, port: 139)
+        var lines = [
+            "واجهة الراوتر (80): " + (web == "ok" ? "✓" : web),
+            "مشاركة الملفات SMB (445): " + (smb == "ok" ? "✓" : smb),
+            "مشاركة قديمة (139): " + (nb == "ok" ? "✓" : nb)
+        ]
+        if web != "ok" && web.contains("ممنوع") {
+            lines.append("← فعّل: الإعدادات ← الخصوصية والأمن ← الشبكة المحلية ← صالحة NAS")
+        } else if web != "ok" {
+            lines.append("← الآيفون لا يصل للراوتر. تأكد أنك على واي فاي البيت وأن العنوان صحيح.")
+        } else if smb != "ok" {
+            lines.append("← الراوتر يعمل لكن مشاركة الملفات SMB مطفأة. فعّلها في الـ FRITZ!Box: Heimnetz ← USB / Speicher ← Heimnetzfreigabe.")
+        } else {
+            lines.append("← الشبكة سليمة. إذا فشل الاتصال فالمشكلة في اسم المستخدم أو كلمة المرور أو المجلد.")
+        }
+        return lines.joined(separator: "\n")
+    }
+}
