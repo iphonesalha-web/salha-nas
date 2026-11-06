@@ -71,8 +71,14 @@ final class FTPClient {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Data?, Error>) in
             c.receive(minimumIncompleteLength: 1, maximumLength: 256 * 1024) { data, _, isComplete, error in
                 if let d = data, !d.isEmpty { cont.resume(returning: d); return }
-                if let e = error { cont.resume(throwing: e); return }
                 if isComplete { cont.resume(returning: nil); return }
+                if let e = error {
+                    // الخادم أغلق الاتصال بعد إرسال كل البيانات: iOS يبلّغ عنه بـ ENODATA (96) — هذه نهاية طبيعية
+                    if case .posix(let code) = e, code == .ENODATA {
+                        cont.resume(returning: nil); return
+                    }
+                    cont.resume(throwing: e); return
+                }
                 cont.resume(returning: Data())
             }
         }
