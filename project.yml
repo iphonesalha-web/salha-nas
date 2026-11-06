@@ -16,6 +16,7 @@ targets:
       - Resources
     dependencies:
       - package: AMSMB2
+        embed: true
     scheme: {}
     info:
       path: Info.plist
@@ -53,3 +54,4 @@ targets:
         CODE_SIGNING_ALLOWED: "NO"
         CODE_SIGNING_REQUIRED: "NO"
         CODE_SIGN_IDENTITY: ""
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"

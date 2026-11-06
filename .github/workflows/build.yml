@@ -38,6 +38,16 @@ jobs:
         run: |
           mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/SalhaNAS.app Payload/
+          APP=Payload/SalhaNAS.app
+          mkdir -p "$APP/Frameworks"
+          # المكتبات الديناميكية من الحزم يجب أن تكون داخل التطبيق
+          for fw in build/Build/Products/Release-iphoneos/PackageFrameworks/*.framework build/Build/Products/Release-iphoneos/*.framework; do
+            [ -d "$fw" ] || continue
+            name=$(basename "$fw")
+            [ -d "$APP/Frameworks/$name" ] || cp -R "$fw" "$APP/Frameworks/"
+          done
+          ls -la "$APP/Frameworks"
+          test -f "$APP/Frameworks/AMSMB2.framework/AMSMB2"
           zip -qry SalhaNAS.ipa Payload
           ls -lh SalhaNAS.ipa
 
