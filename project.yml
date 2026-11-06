@@ -1,0 +1,55 @@
+name: SalhaNAS
+options:
+  bundleIdPrefix: com.salha
+  deploymentTarget:
+    iOS: "16.0"
+packages:
+  AMSMB2:
+    url: https://github.com/amosavian/AMSMB2
+    from: 4.0.0
+targets:
+  SalhaNAS:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+      - Resources
+    dependencies:
+      - package: AMSMB2
+    scheme: {}
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: "صالحة NAS"
+        CFBundleDevelopmentRegion: ar
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        NSPhotoLibraryUsageDescription: "لنسخ صورك وفيديوهاتك إلى القرص الموصول على الـ FRITZ!Box."
+        NSLocalNetworkUsageDescription: "للاتصال بالـ FRITZ!Box في شبكة البيت ونسخ الصور إليها."
+        UIBackgroundModes:
+          - processing
+          - fetch
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.salha.nas.nightly
+          - com.salha.nas.continued.*
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.salha.nas
+        PRODUCT_NAME: SalhaNAS
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGN_IDENTITY: ""
