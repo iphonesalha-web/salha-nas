@@ -156,6 +156,7 @@ struct SettingsView: View {
     @State private var shares: [String] = []
     @State private var busy = false
     @State private var testResult = ""
+    @State private var showFolders = false
 
     var body: some View {
         NavigationView {
@@ -184,7 +185,21 @@ struct SettingsView: View {
                         Label("عرض المجلدات الموجودة", systemImage: "folder.badge.questionmark")
                     }
                     .disabled(busy)
-                    field("مجلد الحفظ داخله، مثال: iPhone", $cfg.folder)
+                    Button {
+                        save()
+                        showFolders = true
+                    } label: {
+                        HStack {
+                            Label("مكان النسخ", systemImage: "folder")
+                            Spacer()
+                            Text("/" + cfg.cleanFolder)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                                .environment(\.layoutDirection, .leftToRight)
+                        }
+                    }
+                    .disabled(busy || cfg.share.isEmpty || password.isEmpty)
                 }
 
                 Section(header: Text("الخيارات")) {
@@ -203,6 +218,10 @@ struct SettingsView: View {
                     }
                     .disabled(busy)
                 }
+            }
+            .sheet(isPresented: $showFolders) {
+                FolderPicker(cfg: cfg, selection: $cfg.folder)
+                    .environment(\.layoutDirection, .rightToLeft)
             }
             .navigationTitle("الإعدادات")
             .navigationBarTitleDisplayMode(.inline)
@@ -257,6 +276,156 @@ struct SettingsView: View {
             testResult = "✓ الاتصال ناجح بالمجلد «\(cfg.share)»"
         } catch {
             testResult = "✗ " + NASError.describe(error)
+        }
+    }
+}
+
+import AMSMB2
+
+/// متصفح مجلدات داخل المجلد المشترك لاختيار مكان النسخ
+struct FolderPicker: View {
+    let cfg: NASConfig
+    @Binding var selection: String
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var smb: SMB2Manager?
+    @State private var path: [String] = []
+    @State private var folders: [String] = []
+    @State private var loading = false
+    @State private var error = ""
+    @State private var showNew = false
+    @State private var newName = ""
+
+    private var current: String { path.joined(separator: "/") }
+
+    var body: some View {
+        NavigationView {
+            List {
+                Section {
+                    HStack {
+                        Image(systemName: "externaldrive")
+                        Text(cfg.share + (current.isEmpty ? "" : "/" + current))
+                            .lineLimit(2)
+                            .environment(\.layoutDirection, .leftToRight)
+                    }
+                    .foregroundColor(.secondary)
+                    if !path.isEmpty {
+                        Button {
+                            path.removeLast()
+                            Task { await load() }
+                        } label: {
+                            Label("رجوع للمجلد الأعلى", systemImage: "arrow.turn.left.up")
+                        }
+                    }
+                }
+
+                Section(header: Text("المجلدات")) {
+                    if loading {
+                        HStack { Spacer(); ProgressView(); Spacer() }
+                    } else if folders.isEmpty && error.isEmpty {
+                        Text("لا توجد مجلدات هنا").foregroundColor(.secondary)
+                    }
+                    ForEach(folders, id: \.self) { f in
+                        Button {
+                            path.append(f)
+                            Task { await load() }
+                        } label: {
+                            HStack {
+                                Label(f, systemImage: "folder.fill")
+                                    .foregroundColor(.primary)
+                                Spacer()
+                                Image(systemName: "chevron.left")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .disabled(loading)
+                    }
+                }
+
+                Section {
+                    Button {
+                        newName = "iPhone-Backup"
+                        showNew = true
+                    } label: {
+                        Label("مجلد جديد هنا", systemImage: "folder.badge.plus")
+                    }
+                    .disabled(loading || smb == nil)
+                }
+
+                if !error.isEmpty {
+                    Section { Text(error).foregroundColor(.red).font(.footnote) }
+                }
+
+                Section(footer: Text("الصور تُحفظ داخل المجلد الذي تختاره، مرتّبة في مجلدات حسب السنة والشهر.")) {
+                    Button {
+                        selection = current
+                        dismiss()
+                    } label: {
+                        Label("اختيار هذا المجلد", systemImage: "checkmark.circle.fill")
+                            .font(.headline)
+                    }
+                    .disabled(loading || smb == nil)
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("اختر مكان النسخ")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("إلغاء") { dismiss() } }
+            }
+            .alert("مجلد جديد", isPresented: $showNew) {
+                TextField("اسم المجلد", text: $newName)
+                Button("إنشاء") { Task { await create() } }
+                Button("إلغاء", role: .cancel) {}
+            }
+            .task {
+                let start = cfg.cleanFolder
+                path = start.isEmpty ? [] : start.split(separator: "/").map(String.init)
+                await load()
+                if !error.isEmpty && !path.isEmpty {   // المجلد المحفوظ غير موجود → نبدأ من الجذر
+                    path = []
+                    await load()
+                }
+            }
+            .onDisappear {
+                let s = smb
+                Task { try? await s?.disconnectShare(gracefully: true) }
+            }
+        }
+        .navigationViewStyle(.stack)
+    }
+
+    private func load() async {
+        loading = true
+        error = ""
+        defer { loading = false }
+        do {
+            if smb == nil { smb = try await BackupEngine.connect(cfg) }
+            guard let smb = smb else { return }
+            let items = try await smb.contentsOfDirectory(atPath: current.isEmpty ? "/" : current)
+            folders = items.compactMap { e -> String? in
+                guard (e[.isDirectoryKey] as? Bool) == true, let n = e[.nameKey] as? String,
+                      !n.hasPrefix("."), !n.hasPrefix("$") else { return nil }
+                return n
+            }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        } catch {
+            folders = []
+            self.error = NASError.describe(error)
+        }
+    }
+
+    private func create() async {
+        let name = newName.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        guard !name.isEmpty, let smb = smb else { return }
+        let target = current.isEmpty ? name : current + "/" + name
+        do {
+            try await smb.createDirectory(atPath: target)
+            path.append(name)
+            await load()
+        } catch {
+            self.error = NASError.describe(error)
         }
     }
 }
