@@ -5,7 +5,7 @@ import AMSMB2
 protocol RemoteStore: AnyObject {
     func makeDir(_ path: String) async
     func size(_ path: String) async -> Int64?
-    func upload(_ local: URL, to path: String) async throws
+    func upload(_ local: URL, to path: String, progress: @escaping @Sendable (Int64) -> Void) async throws
     func remove(_ path: String) async
     func move(_ from: String, to: String) async throws
     func listDirs(_ path: String) async throws -> [String]
@@ -37,8 +37,8 @@ final class SMBStore: RemoteStore {
         return nil
     }
 
-    func upload(_ local: URL, to path: String) async throws {
-        try await smb.uploadItem(at: local, toPath: path, progress: { _ in true })
+    func upload(_ local: URL, to path: String, progress: @escaping @Sendable (Int64) -> Void) async throws {
+        try await smb.uploadItem(at: local, toPath: path, progress: { sent in progress(sent); return true })
     }
 
     func remove(_ path: String) async { try? await smb.removeItem(atPath: path) }
@@ -68,7 +68,9 @@ final class FTPStore: RemoteStore {
 
     func makeDir(_ path: String) async { await ftp.makeDir(abs(path)) }
     func size(_ path: String) async -> Int64? { await ftp.size(abs(path)) }
-    func upload(_ local: URL, to path: String) async throws { try await ftp.upload(local, to: abs(path)) }
+    func upload(_ local: URL, to path: String, progress: @escaping @Sendable (Int64) -> Void) async throws {
+        try await ftp.upload(local, to: abs(path), progress: progress)
+    }
     func remove(_ path: String) async { await ftp.delete(abs(path)) }
     func move(_ from: String, to: String) async throws { try await ftp.rename(abs(from), to: abs(to)) }
     func listDirs(_ path: String) async throws -> [String] { try await ftp.listDirectories(abs(path)) }

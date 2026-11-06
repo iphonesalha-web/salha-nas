@@ -72,10 +72,14 @@ enum ForegroundBackup {
             }
             Task { @MainActor in
                 let engine = BackupEngine.shared
-                engine.onProgress = { done, total in
-                    task.progress.totalUnitCount = Int64(max(total, 1))
-                    task.progress.completedUnitCount = Int64(done)
-                    task.updateTitle(title, subtitle: "\(done) من \(total)")
+                var lastDone = -1
+                engine.onProgress = { units, totalUnits, done, total in
+                    task.progress.totalUnitCount = totalUnits
+                    task.progress.completedUnitCount = units
+                    if done != lastDone {
+                        lastDone = done
+                        task.updateTitle(title, subtitle: "\(done) من \(total)")
+                    }
                 }
                 let r = await engine.run()
                 engine.onProgress = nil

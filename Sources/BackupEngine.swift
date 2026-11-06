@@ -24,7 +24,15 @@ final class BackupEngine: ObservableObject {
     @Published private(set) var lastMessage = ""
 
     /// يُستدعى عند كل تقدّم (للمهمة التي تكمل بعد إقفال الشاشة)
-    var onProgress: ((Int, Int) -> Void)?
+    /// التقدّم بوحدات: كل ملف = 1000 وحدة، حتى يرى النظام تقدّماً مستمراً أثناء رفع الفيديو
+    var onProgress: ((Int64, Int64, Int, Int) -> Void)?
+    private var lastReport = Date.distantPast
+
+    private func report(_ units: Int64, force: Bool = false) {
+        guard force || Date().timeIntervalSince(lastReport) > 0.5 else { return }
+        lastReport = Date()
+        onProgress?(units, Int64(max(total, 1)) * 1000, done, total)
+    }
 
     private var cancelRequested = false
     private var uploadedIDs: Set<String> = []
@@ -198,7 +206,7 @@ final class BackupEngine: ObservableObject {
         status = "جاري فحص الصور…"
         let todo = fetchAssets(cfg).filter { !uploadedIDs.contains($0.localIdentifier) }
         total = todo.count
-        onProgress?(0, total)
+        report(0, force: true)
         if todo.isEmpty { result.message = "لا توجد صور جديدة ✓"; return finish(result) }
 
         status = "جاري الاتصال بالـ NAS…"
@@ -231,7 +239,8 @@ final class BackupEngine: ObservableObject {
             await ensureDir(dir)
 
             var assetOK = true
-            for res in resources(of: asset) {
+            let resList = resources(of: asset)
+            for (ri, res) in resList.enumerated() {
                 if cancelRequested { assetOK = false; break }
                 let name = Self.stamp.string(from: date) + "_" + res.originalFilename
                 let remote = dir + "/" + name
@@ -247,7 +256,13 @@ final class BackupEngine: ObservableObject {
                     } else {
                         let part = remote + ".part"
                         await store.remove(part)
-                        try await store.upload(local, to: part)
+                        let base = Int64(done) * 1000 + Int64(ri) * 1000 / Int64(resList.count)
+                        let span = 1000 / Int64(resList.count)
+                        let total = max(size, 1)
+                        try await store.upload(local, to: part, progress: { [weak self] sent in
+                            let u = base + span * min(sent, total) / total
+                            Task { @MainActor in self?.report(u) }
+                        })
                         await store.remove(remote)
                         try await store.move(part, to: remote)
                         result.uploaded += 1
@@ -260,20 +275,24 @@ final class BackupEngine: ObservableObject {
                     lastMessage = "خطأ في \(name): " + NASError.describe(error)
                 }
                 try? fm.removeItem(at: local)
-                if consecutiveErrors >= 3 { break }
+                if consecutiveErrors >= 5 { break }
             }
 
-            if assetOK { uploadedIDs.insert(asset.localIdentifier) }
+            if assetOK {
+                uploadedIDs.insert(asset.localIdentifier)
+                backedUp = uploadedIDs.count
+                pending = max(0, pending - 1)
+            }
             done += 1
-            onProgress?(done, total)
+            report(Int64(done) * 1000, force: true)
             if done % 10 == 0 { saveIDs() }
-            if consecutiveErrors >= 3 { break }
+            if consecutiveErrors >= 5 { break }
         }
 
         await store.close()
         try? fm.removeItem(at: tmp)
 
-        if consecutiveErrors >= 3 {
+        if consecutiveErrors >= 5 {
             result.message = "توقف بسبب أخطاء متكررة. \(lastMessage)"
         } else if cancelRequested {
             result.message = "تم الإيقاف — نُسخ \(result.uploaded) ملف"

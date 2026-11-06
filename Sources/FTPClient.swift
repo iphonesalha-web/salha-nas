@@ -206,7 +206,7 @@ final class FTPClient {
         try await command("RNTO \(to)", ok: 200...299)
     }
 
-    func upload(_ local: URL, to path: String) async throws {
+    func upload(_ local: URL, to path: String, progress: ((Int64) -> Void)? = nil) async throws {
         let data = try await openData()
         defer { data.cancel() }
         try await send("STOR \(path)")
@@ -215,10 +215,13 @@ final class FTPClient {
 
         let fh = try FileHandle(forReadingFrom: local)
         defer { try? fh.close() }
+        var sent: Int64 = 0
         while true {
             let chunk = try fh.read(upToCount: 256 * 1024) ?? Data()
             if chunk.isEmpty { break }
             try await sendData(data, chunk)
+            sent += Int64(chunk.count)
+            progress?(sent)
         }
         try await sendData(data, nil, final: true)
         let done = try await readReply()
