@@ -10,11 +10,10 @@ struct NASConfig: Codable, Equatable {
     var wifiOnly = true
     var transport: String?   // "smb" أو "ftp"
 
-    var useFTP: Bool { transport == "ftp" }
+    var useFTP: Bool { true }   // SMB أُلغي: يعلّق خادم الـ FRITZ!Box عند انقطاع الاتصال
 
     var isComplete: Bool {
         !host.trimmingCharacters(in: .whitespaces).isEmpty &&
-        (useFTP || !share.trimmingCharacters(in: .whitespaces).isEmpty) &&
         !username.trimmingCharacters(in: .whitespaces).isEmpty &&
         !Keychain.get("nas-password").isEmpty
     }
@@ -102,7 +101,7 @@ final class LocalNetworkPrompt {
 
     func trigger() {
         guard browser == nil else { return }
-        let b = NWBrowser(for: .bonjour(type: "_smb._tcp", domain: nil), using: .tcp)
+        let b = NWBrowser(for: .bonjour(type: "_ftp._tcp", domain: nil), using: .tcp)
         b.stateUpdateHandler = { _ in }
         b.browseResultsChangedHandler = { _, _ in }
         b.start(queue: .main)
@@ -146,19 +145,17 @@ enum NetworkCheck {
     static func run(host: String) async -> String {
         let h = host.trimmingCharacters(in: .whitespaces)
         let web = await probe(host: h, port: 80)
-        let smb = await probe(host: h, port: 445)
-        let nb = await probe(host: h, port: 139)
+        let ftp = await probe(host: h, port: 21)
         var lines = [
             "واجهة الراوتر (80): " + (web == "ok" ? "✓" : web),
-            "مشاركة الملفات SMB (445): " + (smb == "ok" ? "✓" : smb),
-            "مشاركة قديمة (139): " + (nb == "ok" ? "✓" : nb)
+            "خادم FTP (21): " + (ftp == "ok" ? "✓" : ftp)
         ]
         if web != "ok" && web.contains("ممنوع") {
             lines.append("← فعّل: الإعدادات ← الخصوصية والأمن ← الشبكة المحلية ← صالحة NAS")
         } else if web != "ok" {
             lines.append("← الآيفون لا يصل للراوتر. تأكد أنك على واي فاي البيت وأن العنوان صحيح.")
-        } else if smb != "ok" {
-            lines.append("← الراوتر يعمل لكن مشاركة الملفات SMB مطفأة. فعّلها في الـ FRITZ!Box: Heimnetz ← USB / Speicher ← Heimnetzfreigabe.")
+        } else if ftp != "ok" {
+            lines.append("← الراوتر يعمل لكن FTP مطفأ. فعّل «Zugriff über FTP» في الـ FRITZ!Box: Heimnetz ← USB / Speicher ← Heimnetzfreigabe.")
         } else {
             lines.append("← الشبكة سليمة. إذا فشل الاتصال فالمشكلة في اسم المستخدم أو كلمة المرور أو المجلد.")
         }

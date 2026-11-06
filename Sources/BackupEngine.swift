@@ -1,7 +1,6 @@
 import Foundation
 import Photos
 import Network
-import AMSMB2
 
 struct BackupResult {
     var uploaded = 0
@@ -115,29 +114,6 @@ final class BackupEngine: ObservableObject {
             }
             m.start(queue: DispatchQueue(label: "path"))
         }
-    }
-
-    static func connect(_ cfg: NASConfig) async throws -> SMB2Manager {
-        let host = cfg.host.trimmingCharacters(in: .whitespaces)
-        guard let url = URL(string: "smb://" + host),
-              let smb = SMB2Manager(url: url, credential: URLCredential(user: cfg.username, password: cfg.password,
-                                                                        persistence: .forSession)) else {
-            throw NSError(domain: "NAS", code: 1, userInfo: [NSLocalizedDescriptionKey: "عنوان السيرفر غير صحيح"])
-        }
-        smb.timeout = 30
-        try await smb.connectShare(name: cfg.share)
-        return smb
-    }
-
-    static func listShares(_ cfg: NASConfig) async throws -> [String] {
-        let host = cfg.host.trimmingCharacters(in: .whitespaces)
-        guard let url = URL(string: "smb://" + host),
-              let smb = SMB2Manager(url: url, credential: URLCredential(user: cfg.username, password: cfg.password,
-                                                                        persistence: .forSession)) else {
-            throw NSError(domain: "NAS", code: 1, userInfo: [NSLocalizedDescriptionKey: "عنوان السيرفر غير صحيح"])
-        }
-        smb.timeout = 20
-        return try await smb.listShares().map { $0.name }
     }
 
     // MARK: - النسخ

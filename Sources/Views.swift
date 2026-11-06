@@ -100,7 +100,7 @@ struct ContentView: View {
 
                 Section(header: Text("الوجهة")) {
                     row("السيرفر", config.host)
-                    row("الاتصال", config.useFTP ? "FTP" : (config.share.isEmpty ? "SMB" : "SMB · " + config.share))
+                    row("الاتصال", "FTP")
                     row("المجلد", "/" + (config.cleanFolder.isEmpty ? "" : config.cleanFolder + "/") + "السنة/الشهر")
                 }
             }
@@ -153,7 +153,6 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var cfg = NASConfig.load()
     @State private var password = NASConfig.load().password
-    @State private var shares: [String] = []
     @State private var busy = false
     @State private var testResult = ""
     @State private var showFolders = false
@@ -171,35 +170,8 @@ struct SettingsView: View {
                         .environment(\.layoutDirection, .leftToRight)
                 }
 
-                Section(header: Text("طريقة الاتصال"),
-                        footer: Text(cfg.useFTP
-                            ? "FTP: فعّل «Zugriff über FTP» في الـ FRITZ!Box. يظهر كل قرص كمجلد."
-                            : "إذا لم يعمل SMB جرّب FTP.")) {
-                    Picker("طريقة الاتصال", selection: Binding(
-                        get: { cfg.useFTP ? "ftp" : "smb" },
-                        set: { cfg.transport = $0; cfg.folder = "" })) {
-                        Text("SMB").tag("smb")
-                        Text("FTP").tag("ftp")
-                    }
-                    .pickerStyle(.segmented)
-                }
-
-                Section(header: Text("المكان على الـ NAS")) {
-                    if !cfg.useFTP {
-                    if shares.isEmpty {
-                        field("مثال: FRITZ.NAS", $cfg.share)
-                    } else {
-                        Picker("المجلد المشترك", selection: $cfg.share) {
-                            ForEach(shares, id: \.self) { Text($0).tag($0) }
-                        }
-                    }
-                    Button {
-                        Task { await loadShares() }
-                    } label: {
-                        Label("عرض المجلدات الموجودة", systemImage: "folder.badge.questionmark")
-                    }
-                    .disabled(busy)
-                    }
+                Section(header: Text("مكان النسخ"),
+                        footer: Text("الاتصال عبر FTP. تأكد أن «Zugriff über FTP» مفعّل في الـ FRITZ!Box. يظهر كل قرص كمجلد.")) {
                     Button {
                         save()
                         showFolders = true
@@ -214,7 +186,7 @@ struct SettingsView: View {
                                 .environment(\.layoutDirection, .leftToRight)
                         }
                     }
-                    .disabled(busy || (!cfg.useFTP && cfg.share.isEmpty) || password.isEmpty)
+                    .disabled(busy || password.isEmpty)
                 }
 
                 Section(header: Text("الخيارات")) {
@@ -271,45 +243,22 @@ struct SettingsView: View {
         cfg.password = password
     }
 
-    private func loadShares() async {
-        save()
-        busy = true
-        defer { busy = false }
-        do {
-            let list = try await BackupEngine.listShares(cfg)
-                .filter { !$0.hasSuffix("$") }
-            shares = list
-            if !list.contains(cfg.share), let first = list.first { cfg.share = first }
-            testResult = list.isEmpty ? "لم يتم العثور على مجلدات مشتركة." : "اختر المجلد من القائمة."
-        } catch {
-            testResult = "تعذّر الاتصال: " + NASError.describe(error)
-        }
-    }
-
     private func test() async {
         save()
         if password.isEmpty { testResult = "اكتب كلمة المرور أولاً."; return }
-        if !cfg.useFTP && cfg.share.trimmingCharacters(in: .whitespaces).isEmpty {
-            await loadShares()
-            if cfg.share.isEmpty { return }
-            save()
-        }
         busy = true
         defer { busy = false }
         do {
             let store = try await Remote.open(cfg)
             let dirs = (try? await store.listDirs(cfg.cleanFolder)) ?? []
             await store.close()
-            testResult = cfg.useFTP
-                ? "✓ الاتصال ناجح عبر FTP (\(dirs.count) مجلد)"
-                : "✓ الاتصال ناجح بالمجلد «\(cfg.share)»"
+            testResult = "✓ الاتصال ناجح (\(dirs.count) مجلد في مكان النسخ)"
         } catch {
             testResult = "✗ " + NASError.describe(error)
         }
     }
 }
 
-import AMSMB2
 
 /// متصفح مجلدات داخل المجلد المشترك لاختيار مكان النسخ
 struct FolderPicker: View {
@@ -333,7 +282,7 @@ struct FolderPicker: View {
                 Section {
                     HStack {
                         Image(systemName: "externaldrive")
-                        Text((cfg.useFTP ? "FTP:/" : cfg.share + "/") + current)
+                        Text("/" + current)
                             .lineLimit(2)
                             .environment(\.layoutDirection, .leftToRight)
                     }

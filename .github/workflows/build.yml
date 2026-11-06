@@ -47,7 +47,7 @@ jobs:
             [ -d "$APP/Frameworks/$name" ] || cp -R "$fw" "$APP/Frameworks/"
           done
           ls -la "$APP/Frameworks"
-          test -f "$APP/Frameworks/AMSMB2.framework/AMSMB2"
+          rmdir "$APP/Frameworks" 2>/dev/null || true
           zip -qry SalhaNAS.ipa Payload
           ls -lh SalhaNAS.ipa
 

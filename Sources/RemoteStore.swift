@@ -1,7 +1,6 @@
 import Foundation
-import AMSMB2
 
-/// واجهة موحّدة للتخزين البعيد: SMB أو FTP
+/// التخزين البعيد (FTP على الـ FRITZ!Box)
 protocol RemoteStore: AnyObject {
     func makeDir(_ path: String) async
     func size(_ path: String) async -> Int64?
@@ -14,48 +13,10 @@ protocol RemoteStore: AnyObject {
 
 enum Remote {
     static func open(_ cfg: NASConfig) async throws -> RemoteStore {
-        if cfg.useFTP {
-            let f = FTPClient(host: cfg.host.trimmingCharacters(in: .whitespaces))
-            try await f.login(user: cfg.username, password: cfg.password)
-            return FTPStore(f)
-        }
-        return SMBStore(try await BackupEngine.connect(cfg))
+        let f = FTPClient(host: cfg.host.trimmingCharacters(in: .whitespaces))
+        try await f.login(user: cfg.username, password: cfg.password)
+        return FTPStore(f)
     }
-}
-
-final class SMBStore: RemoteStore {
-    private let smb: SMB2Manager
-    init(_ smb: SMB2Manager) { self.smb = smb }
-
-    func makeDir(_ path: String) async { try? await smb.createDirectory(atPath: path) }
-
-    func size(_ path: String) async -> Int64? {
-        guard let a = try? await smb.attributesOfItem(atPath: path) else { return nil }
-        if let n = a[.fileSizeKey] as? NSNumber { return n.int64Value }
-        if let i = a[.fileSizeKey] as? Int64 { return i }
-        if let i = a[.fileSizeKey] as? Int { return Int64(i) }
-        return nil
-    }
-
-    func upload(_ local: URL, to path: String, progress: @escaping @Sendable (Int64) -> Void) async throws {
-        try await smb.uploadItem(at: local, toPath: path, progress: { sent in progress(sent); return true })
-    }
-
-    func remove(_ path: String) async { try? await smb.removeItem(atPath: path) }
-
-    func move(_ from: String, to: String) async throws {
-        try await smb.moveItem(atPath: from, toPath: to)
-    }
-
-    func listDirs(_ path: String) async throws -> [String] {
-        let items = try await smb.contentsOfDirectory(atPath: path.isEmpty ? "/" : path)
-        return items.compactMap { e -> String? in
-            guard (e[.isDirectoryKey] as? Bool) == true, let n = e[.nameKey] as? String else { return nil }
-            return n
-        }
-    }
-
-    func close() async { try? await smb.disconnectShare(gracefully: true) }
 }
 
 final class FTPStore: RemoteStore {
