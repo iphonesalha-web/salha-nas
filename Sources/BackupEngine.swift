@@ -204,7 +204,7 @@ final class BackupEngine: ObservableObject {
         status = "جاري الاتصال بالـ NAS…"
         let smb: SMB2Manager
         do { smb = try await Self.connect(cfg) }
-        catch { result.message = "تعذّر الاتصال: \(error.localizedDescription)"; return finish(result) }
+        catch { result.message = "تعذّر الاتصال: " + NASError.describe(error); return finish(result) }
 
         var madeDirs: Set<String> = []
         func ensureDir(_ path: String) async {
@@ -258,7 +258,7 @@ final class BackupEngine: ObservableObject {
                     assetOK = false
                     result.failed += 1
                     consecutiveErrors += 1
-                    lastMessage = "خطأ في \(name): \(error.localizedDescription)"
+                    lastMessage = "خطأ في \(name): " + NASError.describe(error)
                 }
                 try? fm.removeItem(at: local)
                 if consecutiveErrors >= 3 { break }

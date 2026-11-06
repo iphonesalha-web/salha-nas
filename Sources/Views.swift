@@ -123,6 +123,7 @@ struct ContentView: View {
                 .environment(\.layoutDirection, .rightToLeft)
         }
         .onAppear {
+            LocalNetworkPrompt.shared.trigger()
             photosOK = BackupEngine.photosAllowed
             if !photosOK {
                 Task { photosOK = await BackupEngine.requestPhotos(); engine.refreshCounts() }
@@ -163,7 +164,7 @@ struct SettingsView: View {
                         footer: Text("عادةً العنوان fritz.box أو 192.168.178.1. المستخدم وكلمة المرور هما حساب FRITZ!NAS.")) {
                     field("العنوان", $cfg.host)
                     field("اسم المستخدم", $cfg.username)
-                    SecureField("كلمة المرور", text: $password)
+                    SecureField("كلمة المرور", text: $password, prompt: Text("كلمة المرور"))
                         .textInputAutocapitalization(.never)
                         .disableAutocorrection(true)
                         .environment(\.layoutDirection, .leftToRight)
@@ -236,12 +237,18 @@ struct SettingsView: View {
             if !list.contains(cfg.share), let first = list.first { cfg.share = first }
             testResult = list.isEmpty ? "لم يتم العثور على مجلدات مشتركة." : "اختر المجلد من القائمة."
         } catch {
-            testResult = "تعذّر الاتصال: " + error.localizedDescription
+            testResult = "تعذّر الاتصال: " + NASError.describe(error)
         }
     }
 
     private func test() async {
         save()
+        if password.isEmpty { testResult = "اكتب كلمة المرور أولاً."; return }
+        if cfg.share.trimmingCharacters(in: .whitespaces).isEmpty {
+            await loadShares()
+            if cfg.share.isEmpty { return }
+            save()
+        }
         busy = true
         defer { busy = false }
         do {
@@ -249,7 +256,7 @@ struct SettingsView: View {
             try? await smb.disconnectShare(gracefully: true)
             testResult = "✓ الاتصال ناجح بالمجلد «\(cfg.share)»"
         } catch {
-            testResult = "✗ " + error.localizedDescription
+            testResult = "✗ " + NASError.describe(error)
         }
     }
 }

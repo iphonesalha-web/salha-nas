@@ -68,3 +68,45 @@ enum Keychain {
         return s
     }
 }
+
+import Network
+
+enum NASError {
+    /// رسالة واضحة بالعربي لأخطاء الاتصال الشائعة
+    static func describe(_ error: Error) -> String {
+        let ns = error as NSError
+        let code = ns.code
+        if ns.domain == NSPOSIXErrorDomain || ns.domain == "NSPOSIXErrorDomain" || error is POSIXError {
+            switch code {
+            case 1:  return "الآيفون يمنع الاتصال بالشبكة المحلية. فعّل: الإعدادات ← الخصوصية والأمن ← الشبكة المحلية ← صالحة NAS"
+            case 13: return "اسم المستخدم أو كلمة المرور غير صحيحة، أو المستخدم ليس له صلاحية على هذا المجلد."
+            case 2:  return "المجلد المشترك غير موجود. اضغط «عرض المجلدات الموجودة» واختر منها."
+            case 60: return "الـ FRITZ!Box لم يرد. تأكد أنك متصل بواي فاي البيت."
+            case 61: return "الـ FRITZ!Box رفض الاتصال. تأكد أن خدمة FRITZ!NAS ومشاركة الشبكة (SMB) مفعّلة."
+            case 51, 65: return "لا يمكن الوصول إلى الـ FRITZ!Box. تأكد أنك متصل بواي فاي البيت وأن العنوان صحيح."
+            default: break
+            }
+        }
+        let msg = ns.localizedDescription
+        return msg.isEmpty || msg.hasPrefix("Error code") ? "خطأ في الاتصال (رمز \(code))" : msg
+    }
+}
+
+/// يطلب إذن «الشبكة المحلية» مبكراً حتى لا يفشل أول اتصال
+final class LocalNetworkPrompt {
+    static let shared = LocalNetworkPrompt()
+    private var browser: NWBrowser?
+
+    func trigger() {
+        guard browser == nil else { return }
+        let b = NWBrowser(for: .bonjour(type: "_smb._tcp", domain: nil), using: .tcp)
+        b.stateUpdateHandler = { _ in }
+        b.browseResultsChangedHandler = { _, _ in }
+        b.start(queue: .main)
+        browser = b
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+            self?.browser?.cancel()
+            self?.browser = nil
+        }
+    }
+}

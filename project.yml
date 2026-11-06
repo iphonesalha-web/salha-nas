@@ -29,6 +29,8 @@ targets:
         UILaunchScreen: {}
         NSPhotoLibraryUsageDescription: "لنسخ صورك وفيديوهاتك إلى القرص الموصول على الـ FRITZ!Box."
         NSLocalNetworkUsageDescription: "للاتصال بالـ FRITZ!Box في شبكة البيت ونسخ الصور إليها."
+        NSBonjourServices:
+          - _smb._tcp
         UIBackgroundModes:
           - processing
           - fetch
@@ -46,7 +48,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.salha.nas
         PRODUCT_NAME: SalhaNAS
-        MARKETING_VERSION: "1.0"
+        MARKETING_VERSION: "1.1"
         CURRENT_PROJECT_VERSION: "1"
         TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_VERSION: "5.0"
